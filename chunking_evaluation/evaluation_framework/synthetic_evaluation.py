@@ -8,15 +8,22 @@ from .base_evaluation import BaseEvaluation
 
 import pandas as pd
 import numpy as np
-from openai import OpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from importlib import resources
 
 class SyntheticEvaluation(BaseEvaluation):
-    def __init__(self, corpora_paths: List[str], queries_csv_path: str, chroma_db_path:str = None, openai_api_key=None):
+    def __init__(self, corpora_paths: List[str], queries_csv_path: str, chroma_db_path: str = None):
         super().__init__(questions_csv_path=queries_csv_path, chroma_db_path=chroma_db_path)
         self.corpora_paths = corpora_paths
         self.questions_csv_path = queries_csv_path
-        self.client = OpenAI(api_key=openai_api_key)
+        self.llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-pro",
+            temperature=0,
+            max_tokens=None,
+            timeout=None,
+            max_retries=2
+        )
 
         self.synth_questions_df = None
 
@@ -79,17 +86,15 @@ class SyntheticEvaluation(BaseEvaluation):
 
         tagged_text, tag_indexes = self._tag_text(document)
 
-        completion = self.client.chat.completions.create(
-            model="gpt-4-turbo",
-            response_format={ "type": "json_object" },
-            max_tokens=600,
+        completion = self.llm.chat(
             messages=[
                 {"role": "system", "content": self.question_maker_approx_system_prompt},
                 {"role": "user", "content": self.question_maker_approx_user_prompt.replace("{document}", tagged_text).replace("{prev_questions_str}", prev_questions_str)}
-            ]
+            ],
+            max_tokens=600
         )
         
-        json_response = json.loads(completion.choices[0].message.content)
+        json_response = json.loads(completion["content"])
         
         try:
             text_references = json_response['references']
@@ -139,17 +144,15 @@ class SyntheticEvaluation(BaseEvaluation):
         else:
             prev_questions_str = ""
 
-        completion = self.client.chat.completions.create(
-            model="gpt-4-turbo",
-            response_format={ "type": "json_object" },
-            max_tokens=600,
+        completion = self.llm.chat(
             messages=[
                 {"role": "system", "content": self.question_maker_system_prompt},
                 {"role": "user", "content": self.question_maker_user_prompt.replace("{document}", document).replace("{prev_questions_str}", prev_questions_str)}
-            ]
+            ],
+            max_tokens=600
         )
         
-        json_response = json.loads(completion.choices[0].message.content)
+        json_response = json.loads(completion["content"])
         
         try:
             text_references = json_response['references']
@@ -224,15 +227,15 @@ class SyntheticEvaluation(BaseEvaluation):
             rounds += 1
 
     def _get_sim(self, target, references):
-        response = self.client.embeddings.create(
-            input=[target]+references,
-            model="text-embedding-3-large"
+        response = self.llm.embeddings(
+            input=[target] + references,
+            model="models/embedding-001"
         )
-        nparray1 = np.array(response.data[0].embedding)
+        nparray1 = np.array(response[0])
 
         full_sim = []
-        for i in range(1, len(response.data)):
-            nparray2 = np.array(response.data[i].embedding)
+        for i in range(1, len(response)):
+            nparray2 = np.array(response[i])
             cosine_similarity = np.dot(nparray1, nparray2) / (np.linalg.norm(nparray1) * np.linalg.norm(nparray2))
             full_sim.append(cosine_similarity)
     
@@ -274,7 +277,6 @@ class SyntheticEvaluation(BaseEvaluation):
 
         full_questions_df.to_csv(self.questions_csv_path, index=False)
 
-
     def filter_poor_excerpts(self, threshold=0.36, corpora_subset=[]):
         if os.path.exists(self.questions_csv_path):
             synth_questions_df = pd.read_csv(self.questions_csv_path)
@@ -285,6 +287,7 @@ class SyntheticEvaluation(BaseEvaluation):
                     corpus_list = [c for c in corpus_list if c in corpora_subset]
                 for corpus_id in corpus_list:
                     self._corpus_filter_poor_highlights(corpus_id, synth_questions_df, threshold)
+
 
     def _corpus_filter_duplicates(self, corpus_id, synth_questions_df, threshold):
         corpus_questions_df = synth_questions_df[synth_questions_df['corpus_id'] == corpus_id].copy()
@@ -297,7 +300,7 @@ class SyntheticEvaluation(BaseEvaluation):
 
         response = self.client.embeddings.create(
             input=questions,
-            model="text-embedding-3-large"
+            model="models/embedding-001"
         )
 
         embeddings_matrix = np.array([data.embedding for data in response.data])

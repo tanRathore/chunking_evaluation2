@@ -1,7 +1,7 @@
-from chunking_evaluation.chunking.base_chunker import BaseChunker
+from base_chunker import BaseChunker
 from chunking_evaluation.utils import gemini_token_count
 from chunking_evaluation.chunking import RecursiveTokenChunker
-from google.oauth2 import service_account
+from google.auth import service_account
 from google.cloud import aiplatform
 from vertexai.language_models import TextGenerationModel
 import os
@@ -56,7 +56,7 @@ class GeminiClient:
         self.project = project
         self.location = location
         if api_key is not None:
-            os.environ["GOOGLE_API_KEY"] = ''
+            os.environ["GOOGLE_API_KEY"] = api_key
 
     def create_message(self, system_prompt, messages, max_tokens=1000, temperature=1.0):
         model = TextGenerationModel.from_pretrained(self.model_name)
@@ -115,8 +115,8 @@ class LLMSemanticChunker(BaseChunker):
     def __init__(self, organisation: str = "gemini", api_key: str = None, model_name: str = None):
         if organisation == "gemini":
             if model_name is None:
-                model_name = "gemini-1.5-flash-002"
-            self.client = GeminiClient(model_name, project="rbio-p-datasharing", location="us-west1", api_key='')
+                model_name = "text-bison@001"
+            self.client = GeminiClient(model_name, project="rbio-p-datasharing", location="us-west1", api_key=api_key)
         elif organisation == "openai":
             if model_name is None:
                 model_name = "gpt-4o"

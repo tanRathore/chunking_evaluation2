@@ -1,12 +1,11 @@
 from typing import Any, List, Optional
-from .fixed_token_chunker import TextSplitter
+from .base_chunker import BaseChunker
 from chunking_evaluation.utils import Language
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import re
 import numpy as np
 import logging
-import chromadb.utils.embedding_functions as embedding_functions 
-from chromadb.utils.embedding_functions import GoogleGenerativeAiEmbeddingFunction 
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,11 +26,9 @@ def _split_text_with_regex(
             splits = re.split(separator, text)
     else:
         splits = list(text)
-    #return [s for s in splits if s.strip() != ""]
-    return [s for s in splits if s.strip() != ""]#added later
+    return [s for s in splits if s != ""]
 
-
-class RecursiveTokenChunker(TextSplitter):
+class RecursiveTokenChunker(BaseChunker):
     """Splitting text by recursively looking at characters.
 
     Recursively tries to split by different characters to find one
@@ -55,10 +52,8 @@ class RecursiveTokenChunker(TextSplitter):
         self._is_separator_regex = is_separator_regex
         self.avg_chunk_size = avg_chunk_size
         self.min_chunk_size = min_chunk_size
-        #self.embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        self.embedding_model = embedding_functions.GoogleGenerativeAiEmbeddingFunction(api_key="")
-    def _get_gemini_embedding_function(self):#added later
-        return embedding_functions.GoogleGenerativeAiEmbeddingFunction(api_key="")
+        self.embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+
     def _split_text(self, text: str, separators: List[str]) -> List[str]:
         """Split incoming text and return chunks."""
         final_chunks = []
@@ -78,7 +73,6 @@ class RecursiveTokenChunker(TextSplitter):
         _separator = separator if self._is_separator_regex else re.escape(separator)
         splits = _split_text_with_regex(text, _separator, self._keep_separator)
 
-        splits = [s for s in splits if s.strip()]# added later for removing empty splits
         # Now go merging things, recursively splitting longer texts.
         _good_splits = []
         _separator = "" if self._keep_separator else separator
@@ -98,8 +92,7 @@ class RecursiveTokenChunker(TextSplitter):
         if _good_splits:
             merged_text = self._merge_splits(_good_splits, _separator)
             final_chunks.extend(merged_text)
-        #return final_chunks
-        return [chunk for chunk in final_chunks if chunk.strip()]#added later
+        return final_chunks
 
     def _merge_splits(self, splits: List[str], separator: str) -> List[str]:
         """Merge splits while ensuring semantic coherence."""
@@ -116,64 +109,16 @@ class RecursiveTokenChunker(TextSplitter):
         return merged_chunks
 
     def split_text(self, text: str) -> List[str]:
-            """Split text into chunks while ensuring semantic coherence."""
-            initial_chunks = self._split_text(text, self._separators)
-            initial_chunks = [chunk for chunk in initial_chunks if chunk.strip()]#added extra
-            embeddings = self._generate_embeddings(initial_chunks)
-            distances = self._calculate_cosine_distances(embeddings)
-            return self._finalize_chunks(initial_chunks, distances)
-    # def split_text(self, text: str) -> List[str]:#changed later
-    #     initial_chunks = self._split_text_with_separators(text, self._separators)
-        
-    #     embeddings = self._generate_embeddings(initial_chunks)
-        
-    #     if not embeddings:
-    #         logger.error("No valid embeddings generated, returning initial chunks.")
-    #         return initial_chunks  # Fall back to returning the initial chunks if embeddings failed
+        """Split text into chunks while ensuring semantic coherence."""
+        initial_chunks = self._split_text(text, self._separators)
+        embeddings = self._generate_embeddings(initial_chunks)
+        distances = self._calculate_cosine_distances(embeddings)
+        return self._finalize_chunks(initial_chunks, distances)
 
-    #     distances = self._calculate_cosine_distances(embeddings)
-        
-    #     if not distances:
-    #         logger.error("No valid distances calculated, returning initial chunks.")
-    #         return initial_chunks  # Fall back to returning initial chunks if distances calculation failed
-
-    #     return self._finalize_chunks(initial_chunks, distances)
-    # def _split_text_with_separators(self, text: str, separators: List[str]) -> List[str]:
-    #     """Splits text by a list of separators."""
-    #     # Filter out any empty separators
-    #     valid_separators = [sep for sep in separators if sep]
-
-    #     chunks = [text]
-    #     for separator in valid_separators:
-    #         chunks = [sub_chunk for chunk in chunks for sub_chunk in chunk.split(separator) if sub_chunk.strip()]
-
-    #     return chunks
-
-    # def _generate_embeddings(self, chunks: List[str]) -> List[np.ndarray]:
-    #     """Generate embeddings for the given text chunks."""
-    #     try:
-    #         return self.embedding_model.embed_documents(chunks)
-    #     except Exception as e:
-    #         logger.error(f"Error generating embeddings: {e}")
-    #         return []
-    def _generate_embeddings(self, chunks: List[str]) -> List[np.ndarray]:#added later
+    def _generate_embeddings(self, chunks: List[str]) -> List[np.ndarray]:
         """Generate embeddings for the given text chunks."""
-        # Filter out empty chunks
-        valid_chunks = [chunk for chunk in chunks if chunk.strip()]
-        
-        if not valid_chunks:
-            logger.error("No valid chunks to generate embeddings from.")
-            return []
-
-        embedding_function = self._get_gemini_embedding_function()  # Get the embedding function instance
         try:
-            # Call the embedding function with the valid chunks of text
-            embeddings = embedding_function(valid_chunks)
-            
-            # Convert embeddings to np.ndarray if needed
-            embeddings_array = [np.array(embedding) for embedding in embeddings]
-            return embeddings_array
-            
+            return self.embedding_model.embed_documents(chunks)
         except Exception as e:
             logger.error(f"Error generating embeddings: {e}")
             return []
